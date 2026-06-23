@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ČHMÚ radar</title>
+<link rel="stylesheet" href="/static/leaflet/leaflet.css">
+<style>
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: #111;
+    color: #eee;
+    font-family: system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+  }
+  #map { flex: 1; background: #000; }
+  #controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    background: #1a1a1a;
+    flex-wrap: wrap;
+  }
+  #seek {
+    flex: 1;
+    min-width: 160px;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 6px;
+    border-radius: 3px;
+    background: #444;
+    outline: none;
+  }
+  #seek::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #fff;
+    cursor: pointer;
+  }
+  #seek::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border: 0;
+    border-radius: 50%;
+    background: #fff;
+    cursor: pointer;
+  }
+  button {
+    background: #2563eb;
+    color: #fff;
+    border: 0;
+    border-radius: 4px;
+    padding: 8px 16px;
+    font-size: 15px;
+    cursor: pointer;
+  }
+  button:hover { background: #1d4ed8; }
+  #info { font-variant-numeric: tabular-nums; min-width: 150px; }
+  #info .fct { color: #ffb347; }
+  label.ctl { font-size: 13px; color: #aaa; display: flex; align-items: center; gap: 6px; }
+  /* zachovat radarové barvy ostré i přes průhlednost */
+  .leaflet-image-layer { image-rendering: pixelated; }
+</style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <div id="controls">
+    <button id="playBtn">▶ Přehrát</button>
+    <input id="seek" type="range" min="0" max="0" value="0" step="1">
+    <span id="counter">0 / 0</span>
+    <span id="info"><span id="time">—</span> <span id="tag"></span></span>
+    <label class="ctl">
+      rychlost
+      <select id="speed">
+        <option value="600">pomalu</option>
+        <option value="300" selected>střední</option>
+        <option value="120">rychle</option>
+      </select>
+    </label>
+    <label class="ctl">
+      průhlednost
+      <input id="opacity" type="range" min="0.2" max="1" step="0.05" value="0.75">
+    </label>
+  </div>
+
+<script src="/static/leaflet/leaflet.js"></script>
+<script>
+// Geografický rozsah PNG (celý obraz) dle ČHMÚ: EPSG:3857
+// lon 11.267–20.770°E, lat 48.047–52.167°N  ->  [[jih,západ],[sever,východ]]
+const RADAR_BOUNDS = [[48.047, 11.267], [52.167, 20.770]];
+
+let frames = [];
+let idx = 0;
+let timer = null;
+
+const timeEl = document.getElementById("time");
+const tagEl = document.getElementById("tag");
+const seek = document.getElementById("seek");
+const counter = document.getElementById("counter");
+const playBtn = document.getElementById("playBtn");
+const speed = document.getElementById("speed");
+const opacity = document.getElementById("opacity");
+
+const map = L.map("map").setView([49.8, 15.5], 7);
+
+// Mapové dlaždice online přímo z OSM serveru.
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  minZoom: 6,
+  maxZoom: 19,
+  attribution: "© OpenStreetMap",
+}).addTo(map);
+
+const overlay = L.imageOverlay("", RADAR_BOUNDS, {
+  opacity: Number(opacity.value),
+}).addTo(map);
+
+// Počet pixelů na 1 cm pro daný displej (změřeno přes CSS jednotku cm).
+function pxPerCm() {
+  const probe = document.createElement("div");
+  probe.style.cssText = "width:1cm;position:absolute;visibility:hidden";
+  document.body.appendChild(probe);
+  const px = probe.getBoundingClientRect().width;
+  probe.remove();
+  return px;
+}
+
+// Výchozí pohled: radar vyplní obrazovku s ~2 cm odstupem od okrajů.
+const pad = Math.round(2 * pxPerCm());
+map.fitBounds(RADAR_BOUNDS, { padding: [pad, pad] });
+
+// Obarví posuvník: modrá = pozorování, oranžová = předpověď.
+function paintSeek() {
+  const fctIdx = frames.findIndex(f => f.forecast);
+  if (fctIdx <= 0 || frames.length < 2) {
+    seek.style.background = "#444";
+    return;
+  }
+  const pct = (fctIdx / (frames.length - 1)) * 100;
+  seek.style.background =
+    `linear-gradient(to right, #2563eb 0 ${pct}%, #ffb347 ${pct}% 100%)`;
+}
+
+function show(i) {
+  if (!frames.length) return;
+  idx = (i + frames.length) % frames.length;
+  const f = frames[idx];
+  overlay.setUrl(f.url);
+  timeEl.textContent = f.label;
+  tagEl.textContent = f.forecast ? "(předpověď)" : "";
+  tagEl.className = f.forecast ? "fct" : "";
+  seek.value = idx;
+  counter.textContent = (idx + 1) + " / " + frames.length;
+}
+
+function play() {
+  if (timer) return;
+  playBtn.textContent = "⏸ Stop";
+  timer = setInterval(() => show(idx + 1), Number(speed.value));
+}
+
+function stop() {
+  clearInterval(timer);
+  timer = null;
+  playBtn.textContent = "▶ Přehrát";
+}
+
+playBtn.addEventListener("click", () => timer ? stop() : play());
+
+seek.addEventListener("input", () => {
+  stop();
+  show(Number(seek.value));
+});
+
+speed.addEventListener("change", () => {
+  if (timer) { stop(); play(); }
+});
+
+opacity.addEventListener("input", () => overlay.setOpacity(Number(opacity.value)));
+
+fetch("/frames")
+  .then(r => r.json())
+  .then(data => {
+    frames = data;
+    seek.max = Math.max(0, frames.length - 1);
+    paintSeek();
+    // přednačtení snímků kvůli plynulé animaci
+    frames.forEach(f => { const im = new Image(); im.src = f.url; });
+    show(0);
+    play();  // automatické přehrávání střední rychlostí (výchozí v <select>)
+  })
+  .catch(() => { timeEl.textContent = "chyba načítání snímků"; });
+</script>
+</body>
+</html>

@@ -1,0 +1,50 @@
+# Funguje s `docker compose` i `podman-compose`.
+#   spusť aplikaci:
+#        podman-compose up --build       (nebo: docker compose up --build)
+# Viewer poté běží na host:port přesně podle conf/app.conf (výchozí
+# http://127.0.0.1:8987/).
+#
+# Veškeré nastavení (interval, hours_back, URL, cesty, host i port) se bere
+# z conf/app.conf, který je připojen jako volume – stačí ho upravit a služby
+# restartovat, není potřeba rebuild.
+#   - Viewer používá host networking, takže naslouchá přímo na hostiteli na
+#     adrese a portu z conf/app.conf. Port se tedy nastavuje jen na jednom místě.
+services:
+  downloader:
+    build: .
+    # Smyčka je v main.py: každých interval s stáhne nová data a uklidí stará.
+    command: python -m chmi_radar.main
+    volumes:
+      - ./conf:/app/conf:ro,z
+      - radar:/app/radar
+      - forecast:/app/forecast
+    restart: unless-stopped
+    # Zdravý = v radar/ je čerstvý snímek (mladší než 2× interval) -> smyčka jede.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import time,glob,os;from chmi_radar import config;f=glob.glob(os.path.join(config.OUT_RADAR_DATA,'*.png'));assert f and time.time()-max(map(os.path.getmtime,f))<2*config.INTERVAL"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  viewer:
+    build: .
+    command: python -m chmi_radar.serve
+    # Host networking: kontejner naslouchá rovnou na hostiteli, port řídí conf.
+    network_mode: host
+    volumes:
+      - ./conf:/app/conf:ro,z
+      - radar:/app/radar
+      - forecast:/app/forecast
+    restart: unless-stopped
+    # Zdravý = HTTP server odpovídá na portu z conf/app.conf.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;from chmi_radar import config;urllib.request.urlopen(f'http://127.0.0.1:{config.PORT}/',timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  radar:
+  forecast:

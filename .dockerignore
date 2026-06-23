@@ -1,0 +1,7 @@
+.git
+.idea
+radar
+forecast
+tiles
+**/__pycache__
+*.pyc

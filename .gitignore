@@ -1,0 +1,9 @@
+# stažená data – necommitovat
+tiles/
+radar/
+forecast/
+.idea
+.claude
+
+__pycache__/
+*.pyc
