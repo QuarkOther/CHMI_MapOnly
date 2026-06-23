@@ -23,6 +23,7 @@ STATIC_DIR = os.path.join(WEB_DIR, "static")
 
 HOST = config.HOST
 PORT = config.PORT
+HOURS_BACK = config.HOURS_BACK
 
 
 def time_key(name):
@@ -31,12 +32,17 @@ def time_key(name):
     return parts[2] + parts[3]
 
 
-def label(name):
+def frame_utc(name):
+    """Vrátí UTC datetime snímku z názvu souboru."""
     parts = os.path.basename(name).split(".")
-    date, hhmm = parts[2], parts[3]
+    return datetime.strptime(parts[2] + parts[3], "%Y%m%d%H%M").replace(
+        tzinfo=timezone.utc
+    )
+
+
+def label(name):
     # názvy souborů ČHMÚ jsou v UTC; pro zobrazení převedeme na pražský čas
-    utc = datetime.strptime(date + hhmm, "%Y%m%d%H%M").replace(tzinfo=timezone.utc)
-    local = utc.astimezone(PRAGUE_TZ)
+    local = frame_utc(name).astimezone(PRAGUE_TZ)
     return f"{local:%d.%m. %H:%M}"
 
 
@@ -52,6 +58,7 @@ def collect_frames():
         frames.append({
             "url": "/radar/" + os.path.basename(path),
             "label": label(path),
+            "ts": int(frame_utc(path).timestamp()),
             "forecast": False,
         })
 
@@ -75,6 +82,7 @@ def collect_frames():
             frames.append({
                 "url": f"/forecast/{run_name}/" + os.path.basename(path),
                 "label": label(path),
+                "ts": int(frame_utc(path).timestamp()),
                 "forecast": True,
             })
 
@@ -97,15 +105,20 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_file(path, ctype)
 
         if self.path == "/frames":
-            body = json.dumps(collect_frames()).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-            return
+            return self.send_json(collect_frames())
+
+        if self.path == "/config":
+            return self.send_json({"hours_back": HOURS_BACK})
 
         return super().do_GET()
+
+    def send_json(self, data):
+        body = json.dumps(data).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def send_file(self, path, content_type):
         with open(path, "rb") as f:

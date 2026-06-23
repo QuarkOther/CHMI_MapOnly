@@ -28,7 +28,11 @@ Aplikace má dvě části:
 
   Frontend (Leaflet) snímky animuje jako overlay nad mapou OSM – tlačítko
   přehrávání, posuvník (modrá = pozorování, oranžová = předpověď), volba
-  rychlosti a průhlednosti.
+  rozsahu zobrazeného pozorování, rychlosti a průhlednosti. Volby rozsahu se
+  generují podle `hours_back` (celé hodiny od maxima dolů ke 2 h, pak 1,5 / 1 /
+  0,5 h); výchozí jsou 3 h, a je-li `hours_back` menší než 3, největší dostupná
+  hodnota. Rozsah filtruje jen z dat, která downloader drží, takže okno lze
+  zúžit, ne rozšířit nad `hours_back`.
 
 ## Schéma
 
