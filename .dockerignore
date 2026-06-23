@@ -2,6 +2,7 @@
 .idea
 radar
 forecast
+stations
 tiles
 **/__pycache__
 *.pyc

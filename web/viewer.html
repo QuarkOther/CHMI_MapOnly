@@ -62,8 +62,36 @@
   #info { font-variant-numeric: tabular-nums; min-width: 150px; }
   #info .fct { color: #ffb347; }
   label.ctl { font-size: 13px; color: #aaa; display: flex; align-items: center; gap: 6px; }
+  #layers, #overlays { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  #layers label.ctl, #overlays label.ctl { color: #ddd; cursor: pointer; }
+  #dl {
+    color: #93c5fd;
+    font-size: 13px;
+    text-decoration: none;
+  }
+  #dl:hover { text-decoration: underline; }
   /* zachovat radarové barvy ostré i přes průhlednost */
   .leaflet-image-layer { image-rendering: pixelated; }
+  /* značky pozemních stanic – popisky vystředěné na bod stanice */
+  .st-icon { background: none; border: 0; }
+  .st-box {
+    display: inline-block;        /* roztáhne pozadí podle obsahu (rodič má šířku 0) */
+    width: max-content;
+    transform: translate(-50%, -50%);
+    white-space: nowrap;
+    background: rgba(17, 17, 17, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 4px;
+    padding: 2px 6px;
+    font: 600 12px system-ui, sans-serif;
+    line-height: 1.25;
+    color: #fff;
+    text-align: center;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+  }
+  .st-t { font-size: 13px; }
+  .st-sub { display: block; color: #cbd5e1; font-weight: 500; }
+  .st-arrow { display: inline-block; margin-right: 2px; }
   #help {
     position: absolute;
     right: 12px;
@@ -119,6 +147,20 @@
       průhlednost
       <input id="opacity" type="range" min="0.2" max="1" step="0.05" value="0.75">
     </label>
+    <span id="overlays">
+      srážky:
+      <label class="ctl"><input id="showRadar" type="checkbox" checked> radar</label>
+      <label class="ctl"><input id="showForecast" type="checkbox" checked> předpověď</label>
+    </span>
+    <span id="layers">
+      stanice:
+      <label class="ctl"><input type="checkbox" data-el="T"> teplota</label>
+      <label class="ctl"><input type="checkbox" data-el="wind"> vítr</label>
+      <label class="ctl"><input type="checkbox" data-el="H"> vlhkost</label>
+      <label class="ctl"><input type="checkbox" data-el="P"> tlak</label>
+    </span>
+    <label class="ctl"><input id="geoloc" type="checkbox"> moje poloha</label>
+    <a id="dl" href="/stations.json" download="chmi-stanice.json">⬇ data stanic</a>
   </div>
 
 <script src="/static/leaflet/leaflet.js"></script>
@@ -140,6 +182,8 @@ const playBtn = document.getElementById("playBtn");
 const speed = document.getElementById("speed");
 const opacity = document.getElementById("opacity");
 const range = document.getElementById("range");
+const showRadar = document.getElementById("showRadar");
+const showForecast = document.getElementById("showForecast");
 
 // keyboard: false – šipky ovládají snímky, ne posun mapy
 const map = L.map("map", { keyboard: false }).setView([49.8, 15.5], 7);
@@ -154,6 +198,152 @@ L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
 const overlay = L.imageOverlay("", RADAR_BOUNDS, {
   opacity: Number(opacity.value),
 }).addTo(map);
+
+// Pozemní stanice ČHMÚ: bodová data vykreslená jako popisky nad radarem,
+// synchronizovaná s časem zobrazeného snímku. Vrstvy zapínají checkboxy.
+let stationData = { elements: [], stations: [] };
+const activeEls = new Set();                 // zapnuté veličiny: T / wind / H / P
+const stationLayer = L.layerGroup().addTo(map);
+
+// Hodnota veličiny v čase snímku: poslední pozorování s časem <= ts.
+// Pro novější snímky i předpověď drží poslední známé měření (zamrzne);
+// null jen u snímků starších než vůbec první dostupné pozorování.
+function sampleAt(pts, ts) {
+  if (!pts || !pts.length) return null;
+  let val = null;
+  for (const p of pts) {
+    if (p[0] <= ts) val = p[1];
+    else break;
+  }
+  return val;
+}
+
+// Barva teploty: modrá (chladno) -> červená (horko), -15..40 °C.
+function tColor(v) {
+  const t = Math.max(-15, Math.min(40, v));
+  const hue = 240 - ((t + 15) / 55) * 240;
+  return `hsl(${hue}, 85%, 62%)`;
+}
+
+// Šipka větru: D je směr, ODKUD vítr vane; šipka ukazuje, KAM proudí (D+180).
+function windHtml(f, d) {
+  const arrow = d == null ? "" :
+    `<span class="st-arrow" style="transform:rotate(${(d + 180) % 360}deg)">↑</span>`;
+  return `<span class="st-sub">${arrow}${f.toFixed(1)} m/s</span>`;
+}
+
+function renderStations(ts) {
+  stationLayer.clearLayers();
+  if (!activeEls.size || ts == null) return;
+
+  for (const st of stationData.stations) {
+    const s = st.series;
+    const parts = [];
+
+    if (activeEls.has("T")) {
+      const v = sampleAt(s.T, ts);
+      if (v != null) parts.push(`<span class="st-t" style="color:${tColor(v)}">${v.toFixed(1)}°</span>`);
+    }
+    if (activeEls.has("wind")) {
+      const f = sampleAt(s.F, ts);
+      if (f != null) parts.push(windHtml(f, sampleAt(s.D, ts)));
+    }
+    if (activeEls.has("H")) {
+      const v = sampleAt(s.H, ts);
+      if (v != null) parts.push(`<span class="st-sub">${Math.round(v)} %</span>`);
+    }
+    if (activeEls.has("P")) {
+      const v = sampleAt(s.P, ts);
+      if (v != null) parts.push(`<span class="st-sub">${v.toFixed(0)} hPa</span>`);
+    }
+
+    if (!parts.length) continue;
+    const icon = L.divIcon({
+      className: "st-icon",
+      iconSize: [0, 0],
+      html: `<div class="st-box">${parts.join("")}</div>`,
+    });
+    L.marker([st.lat, st.lon], { icon, keyboard: false })
+      .bindTooltip(st.name)
+      .addTo(stationLayer);
+  }
+}
+
+function currentTs() {
+  // Bez snímků (radar i předpověď vypnuté) ber aktuální čas, ať stanice
+  // ukazují poslední měření i bez radaru.
+  return frames[idx] ? frames[idx].ts : Math.floor(Date.now() / 1000);
+}
+
+function loadStations() {
+  return fetch("/stations.json")
+    .then(r => r.json())
+    .then(d => {
+      stationData = d && d.stations ? d : { elements: [], stations: [] };
+      renderStations(currentTs());
+    });
+}
+
+document.querySelectorAll("#layers input[type=checkbox]").forEach(cb => {
+  cb.addEventListener("change", () => {
+    if (cb.checked) activeEls.add(cb.dataset.el);
+    else activeEls.delete(cb.dataset.el);
+    renderStations(currentTs());
+  });
+});
+
+// Aktuální poloha: zaškrtnutím se přes prohlížeč zjistí poloha a vykreslí
+// modré kolečko, které sleduje pohyb; odškrtnutím zmizí.
+// Pozn.: geolokace funguje jen v zabezpečeném kontextu (localhost nebo HTTPS).
+const geoloc = document.getElementById("geoloc");
+let geoMarker = null;
+let geoWatch = null;
+
+geoloc.addEventListener("change", () => {
+  if (geoloc.checked) startGeo();
+  else stopGeo();
+});
+
+function startGeo() {
+  if (!navigator.geolocation) {
+    geoloc.checked = false;
+    alert("Geolokace není v tomto prohlížeči dostupná.");
+    return;
+  }
+  geoWatch = navigator.geolocation.watchPosition(
+    pos => {
+      const ll = [pos.coords.latitude, pos.coords.longitude];
+      if (!geoMarker) {
+        geoMarker = L.circleMarker(ll, {
+          radius: 8,
+          color: "#1d4ed8",
+          weight: 2,
+          fillColor: "#3b82f6",
+          fillOpacity: 0.6,
+        }).bindTooltip("Moje poloha").addTo(map);
+      } else {
+        geoMarker.setLatLng(ll);
+      }
+    },
+    err => {
+      geoloc.checked = false;
+      stopGeo();
+      alert("Polohu se nepodařilo zjistit: " + err.message);
+    },
+    { enableHighAccuracy: true }
+  );
+}
+
+function stopGeo() {
+  if (geoWatch !== null) {
+    navigator.geolocation.clearWatch(geoWatch);
+    geoWatch = null;
+  }
+  if (geoMarker) {
+    map.removeLayer(geoMarker);
+    geoMarker = null;
+  }
+}
 
 // Počet pixelů na 1 cm pro daný displej (změřeno přes CSS jednotku cm).
 function pxPerCm() {
@@ -191,6 +381,7 @@ function show(i) {
   tagEl.className = f.forecast ? "fct" : "";
   seek.value = idx;
   counter.textContent = (idx + 1) + " / " + frames.length;
+  renderStations(f.ts);
 }
 
 function play() {
@@ -287,19 +478,42 @@ function applyRange() {
       frames = allFrames.filter(f => f.forecast || f.ts >= cutoff);
     }
   }
+  // checkboxy radar / předpověď: vyfiltruj vypnutý typ snímků
+  if (!showRadar.checked) frames = frames.filter(f => f.forecast);
+  if (!showForecast.checked) frames = frames.filter(f => !f.forecast);
   seek.max = Math.max(0, frames.length - 1);
   paintSeek();
 }
 
-range.addEventListener("change", () => {
+// Přepočítá zobrazené okno (po změně rozsahu nebo zapnutí/vypnutí vrstev) a
+// zachová pokud možno prohlížený snímek; když nezbyl žádný, skryje overlay.
+function refreshFrames() {
   const playing = timer !== null;
   const currentUrl = frames[idx] ? frames[idx].url : null;
   applyRange();
+
+  if (!frames.length) {
+    stop();
+    overlay.setOpacity(0);
+    seek.value = 0;
+    counter.textContent = "0 / 0";
+    timeEl.textContent = "—";
+    tagEl.textContent = "";
+    tagEl.className = "";
+    renderStations(currentTs());  // stanice ukaž i bez radaru
+    return;
+  }
+
+  overlay.setOpacity(Number(opacity.value));
   preload(frames);
   let i = frames.findIndex(f => f.url === currentUrl);
   if (i < 0) i = playing ? frames.length - 1 : Math.min(idx, frames.length - 1);
   show(i);
-});
+}
+
+range.addEventListener("change", refreshFrames);
+showRadar.addEventListener("change", refreshFrames);
+showForecast.addEventListener("change", refreshFrames);
 
 function loadFrames(initial) {
   return fetch("/frames")
@@ -340,6 +554,9 @@ fetch("/config")
     loadFrames(true).catch(() => { timeEl.textContent = "chyba načítání snímků"; });
     // pravidelně dotahuj nové snímky bez nutnosti refreshe stránky
     setInterval(() => loadFrames(false).catch(() => {}), 60000);
+    // data stanic (mění se ~každých INTERVAL s) – načti a periodicky obnovuj
+    loadStations().catch(() => {});
+    setInterval(() => loadStations().catch(() => {}), 120000);
   });
 </script>
 </body>

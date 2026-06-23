@@ -4,7 +4,8 @@
 
 Webový prohlížeč radarových dat ČHMÚ pro Českou republiku – animace posledních
 hodin pozorování plus krátkodobá radarová předpověď, vykreslené přes mapu
-OpenStreetMap.
+OpenStreetMap. Volitelně lze do mapy zapnout i pozemní pozorování ze stanic
+ČHMÚ (teplota, vítr, vlhkost, tlak) jako popisky synchronizované s animací.
 
 ## Co projekt dělá
 
@@ -14,7 +15,11 @@ Aplikace má dvě části:
   stahuje z [ČHMÚ open data](https://opendata.chmi.cz/):
   - radarové snímky `maxz` (kompozit max. odrazivosti) za posledních `hours_back`
     hodin, po 5 minutách,
-  - nejnovější radarovou předpověď (`fct_maxz`, .tar archiv, který se rozbalí).
+  - nejnovější radarovou předpověď (`fct_maxz`, .tar archiv, který se rozbalí),
+  - pozemní pozorování ze stanic ČHMÚ (`climate/now`, 10minutová data českých
+    stanic) a z nich poskládá agregát `stations/stations.json` s časovými
+    řadami teploty (`T`), vlhkosti (`H`), tlaku (`P`) a větru (`F`, `D`) za
+    posledních `hours_back` hodin.
 
   Zároveň uklízí data starší než `hours_back` a ponechává jen nejnovější běh
   předpovědi.
@@ -24,11 +29,16 @@ Aplikace má dvě části:
   - servíruje `web/viewer.html` a statické soubory Leaflet,
   - na endpointu `/frames` vrací JSON se seznamem snímků (radar + navazující
     předpověď),
+  - na endpointu `/stations.json` vrací agregát pozorování ze stanic (tentýž
+    soubor slouží i jako odkaz „⬇ data stanic" ke stažení),
   - servíruje samotné PNG z adresářů `radar/` a `forecast/`.
 
   Frontend (Leaflet) snímky animuje jako overlay nad mapou OSM – tlačítko
   přehrávání, posuvník (modrá = pozorování, oranžová = předpověď), volba
-  rozsahu zobrazeného pozorování, rychlosti a průhlednosti. Volby rozsahu se
+  rozsahu zobrazeného pozorování, rychlosti a průhlednosti. Checkboxy „stanice"
+  (teplota / vítr / vlhkost / tlak) zapínají popisky stanic, jejichž hodnoty se
+  mění podle času zobrazeného snímku (u snímků předpovědi drží poslední
+  pozorování). Teplota je barevně odlišená, vítr má šipku ve směru proudění. Volby rozsahu se
   generují podle `hours_back` (celé hodiny od maxima dolů ke 2 h, pak 1,5 / 1 /
   0,5 h); výchozí jsou 3 h, a je-li `hours_back` menší než 3, největší dostupná
   hodnota. Rozsah filtruje jen z dat, která downloader drží, takže okno lze
@@ -40,6 +50,7 @@ Aplikace má dvě části:
                         ČHMÚ open data
         opendata.chmi.cz/.../maxz/png/      (radarové PNG)
         opendata.chmi.cz/.../fct_maxz/png/  (předpověď .tar)
+        opendata.chmi.cz/.../climate/now/   (pozorování stanic, JSON)
                               │
                               │  HTTP GET (requests)
                               ▼
@@ -47,22 +58,24 @@ Aplikace má dvě části:
    │  downloader  (chmi_radar.main → update_once)  │
    │   • get_radar_history()  stáhne radar         │
    │   • get_forecast()       stáhne + rozbalí tar │
+   │   • update_stations()    stáhne pozorování    │
    │   • cleanup()            smaže stará data     │
    │   smyčka každých INTERVAL s                   │
    └───────────────┬───────────────────────────────┘
-                   │ zapisuje PNG
+                   │ zapisuje PNG + stations.json
                    ▼
-            radar/        forecast/<běh>/        ◄── sdílené adresáře / volumes
+       radar/   forecast/<běh>/   stations/   ◄── sdílené adresáře / volumes
                    │
-                   │ čte PNG
+                   │ čte PNG + JSON
                    ▼
    ┌─────────────────────────────────────────────┐
    │  viewer  (chmi_radar.serve, http.server)      │
-   │   GET /            → web/viewer.html          │
-   │   GET /frames      → JSON seznam snímků       │
-   │   GET /radar/*     → radarové PNG             │
-   │   GET /forecast/*  → PNG předpovědi           │
-   │   GET /static/*    → Leaflet                  │
+   │   GET /              → web/viewer.html        │
+   │   GET /frames        → JSON seznam snímků     │
+   │   GET /stations.json → pozorování stanic      │
+   │   GET /radar/*       → radarové PNG           │
+   │   GET /forecast/*    → PNG předpovědi          │
+   │   GET /static/*      → Leaflet                │
    └───────────────┬───────────────────────────────┘
                    │ HTTP
                    ▼
@@ -106,7 +119,7 @@ PORT=9000 HOURS_BACK=2 python -m chmi_radar.serve
 
 Funguje s `docker compose` i `podman-compose`. Compose spouští dvě služby –
 `downloader` a `viewer` – které sdílejí data přes pojmenované volumes
-(`radar`, `forecast`).
+(`radar`, `forecast`, `stations`).
 
 ```bash
 podman-compose up --build

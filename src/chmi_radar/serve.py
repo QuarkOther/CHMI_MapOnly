@@ -16,6 +16,7 @@ PROJECT_HOME = config.PROJECT_HOME
 
 OUT_RADAR_DATA = config.OUT_RADAR_DATA
 OUT_FORECAST = config.OUT_FORECAST
+OUT_STATIONS = config.OUT_STATIONS
 
 WEB_DIR = os.path.join(PROJECT_HOME, "web")
 VIEWER = os.path.join(WEB_DIR, "viewer.html")
@@ -106,6 +107,12 @@ class Handler(SimpleHTTPRequestHandler):
 
         if self.path == "/frames":
             return self.send_json(collect_frames())
+
+        if self.path == "/stations.json":
+            path = os.path.join(OUT_STATIONS, "stations.json")
+            if not os.path.isfile(path):
+                return self.send_json({"elements": [], "stations": []})
+            return self.send_file(path, "application/json")
 
         if self.path == "/config":
             return self.send_json({"hours_back": HOURS_BACK})

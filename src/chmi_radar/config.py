@@ -46,7 +46,13 @@ FORECAST_URL = _get(
     "sources", "forecast_url", "FORECAST_URL",
     "https://opendata.chmi.cz/meteorology/weather/radar/composite/fct_maxz/png/",
 )
+# základ datasetu pozemních stanic (climate/now): obsahuje data/ a metadata/
+STATIONS_URL = _get(
+    "sources", "stations_url", "STATIONS_URL",
+    "https://opendata.chmi.cz/meteorology/climate/now/",
+)
 
 # adresáře dat
 OUT_RADAR_DATA = _resolve(_get("paths", "radar_dir", "RADAR_DIR", "radar"))
 OUT_FORECAST = _resolve(_get("paths", "forecast_dir", "FORECAST_DIR", "forecast"))
+OUT_STATIONS = _resolve(_get("paths", "stations_dir", "STATIONS_DIR", "stations"))

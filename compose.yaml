@@ -18,7 +18,8 @@ services:
       - ./conf:/app/conf:ro,z
       - radar:/app/radar
       - forecast:/app/forecast
-    restart: unless-stopped
+      - stations:/app/stations
+    restart: always
     # Zdravý = v radar/ je čerstvý snímek (mladší než 2× interval) -> smyčka jede.
     healthcheck:
       test: ["CMD", "python", "-c", "import time,glob,os;from chmi_radar import config;f=glob.glob(os.path.join(config.OUT_RADAR_DATA,'*.png'));assert f and time.time()-max(map(os.path.getmtime,f))<2*config.INTERVAL"]
@@ -36,7 +37,8 @@ services:
       - ./conf:/app/conf:ro,z
       - radar:/app/radar
       - forecast:/app/forecast
-    restart: unless-stopped
+      - stations:/app/stations
+    restart: always
     # Zdravý = HTTP server odpovídá na portu z conf/app.conf.
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request;from chmi_radar import config;h=config.HOST if config.HOST not in ('0.0.0.0','') else '127.0.0.1';urllib.request.urlopen(f'http://{h}:{config.PORT}/',timeout=5)"]
@@ -48,3 +50,4 @@ services:
 volumes:
   radar:
   forecast:
+  stations:
