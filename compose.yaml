@@ -39,7 +39,7 @@ services:
     restart: unless-stopped
     # Zdravý = HTTP server odpovídá na portu z conf/app.conf.
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request;from chmi_radar import config;urllib.request.urlopen(f'http://127.0.0.1:{config.PORT}/',timeout=5)"]
+      test: ["CMD", "python", "-c", "import urllib.request;from chmi_radar import config;h=config.HOST if config.HOST not in ('0.0.0.0','') else '127.0.0.1';urllib.request.urlopen(f'http://{h}:{config.PORT}/',timeout=5)"]
       interval: 30s
       timeout: 10s
       retries: 3
