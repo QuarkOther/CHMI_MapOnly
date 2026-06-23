@@ -1,10 +1,15 @@
 import glob
 import json
 import os
+from datetime import datetime, timezone
 from functools import partial
 from http.server import HTTPServer, SimpleHTTPRequestHandler
+from zoneinfo import ZoneInfo
 
 from chmi_radar import config
+
+
+PRAGUE_TZ = ZoneInfo("Europe/Prague")
 
 
 PROJECT_HOME = config.PROJECT_HOME
@@ -29,7 +34,10 @@ def time_key(name):
 def label(name):
     parts = os.path.basename(name).split(".")
     date, hhmm = parts[2], parts[3]
-    return f"{date[6:8]}.{date[4:6]}. {hhmm[:2]}:{hhmm[2:]}"
+    # názvy souborů ČHMÚ jsou v UTC; pro zobrazení převedeme na pražský čas
+    utc = datetime.strptime(date + hhmm, "%Y%m%d%H%M").replace(tzinfo=timezone.utc)
+    local = utc.astimezone(PRAGUE_TZ)
+    return f"{local:%d.%m. %H:%M}"
 
 
 def collect_frames():

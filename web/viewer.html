@@ -64,10 +64,39 @@
   label.ctl { font-size: 13px; color: #aaa; display: flex; align-items: center; gap: 6px; }
   /* zachovat radarové barvy ostré i přes průhlednost */
   .leaflet-image-layer { image-rendering: pixelated; }
+  #help {
+    position: absolute;
+    right: 12px;
+    bottom: 12px;
+    z-index: 1000;
+    background: rgba(26, 26, 26, 0.85);
+    color: #ddd;
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    line-height: 1.9;
+    pointer-events: none;
+  }
+  #help .key {
+    display: inline-block;
+    min-width: 16px;
+    padding: 1px 6px;
+    margin-right: 3px;
+    text-align: center;
+    background: #333;
+    border: 1px solid #555;
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    font-family: monospace;
+  }
 </style>
 </head>
 <body>
-  <div id="map"></div>
+  <div id="map">
+    <div id="help">
+      <div><span class="key">◀</span><span class="key">▶</span> přepínání snímků</div>
+    </div>
+  </div>
 
   <div id="controls">
     <button id="playBtn">▶ Přehrát</button>
@@ -106,7 +135,8 @@ const playBtn = document.getElementById("playBtn");
 const speed = document.getElementById("speed");
 const opacity = document.getElementById("opacity");
 
-const map = L.map("map").setView([49.8, 15.5], 7);
+// keyboard: false – šipky ovládají snímky, ne posun mapy
+const map = L.map("map", { keyboard: false }).setView([49.8, 15.5], 7);
 
 // Mapové dlaždice online přímo z OSM serveru.
 L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -176,24 +206,70 @@ seek.addEventListener("input", () => {
   show(Number(seek.value));
 });
 
+// šipkami se krokuje mezi snímky; přehrávání se přitom pozastaví
+document.addEventListener("keydown", (e) => {
+  if (e.key === "ArrowRight") {
+    stop();
+    show(idx + 1);
+    e.preventDefault();
+  } else if (e.key === "ArrowLeft") {
+    stop();
+    show(idx - 1);
+    e.preventDefault();
+  }
+});
+
 speed.addEventListener("change", () => {
   if (timer) { stop(); play(); }
 });
 
 opacity.addEventListener("input", () => overlay.setOpacity(Number(opacity.value)));
 
-fetch("/frames")
-  .then(r => r.json())
-  .then(data => {
-    frames = data;
-    seek.max = Math.max(0, frames.length - 1);
-    paintSeek();
-    // přednačtení snímků kvůli plynulé animaci
-    frames.forEach(f => { const im = new Image(); im.src = f.url; });
-    show(0);
-    play();  // automatické přehrávání střední rychlostí (výchozí v <select>)
-  })
-  .catch(() => { timeEl.textContent = "chyba načítání snímků"; });
+// přednačtení snímků kvůli plynulé animaci (jen ty, co jsme ještě neviděli)
+const preloaded = new Set();
+function preload(list) {
+  list.forEach(f => {
+    if (preloaded.has(f.url)) return;
+    preloaded.add(f.url);
+    const im = new Image();
+    im.src = f.url;
+  });
+}
+
+function loadFrames(initial) {
+  return fetch("/frames")
+    .then(r => r.json())
+    .then(data => {
+      const prevLast = frames.length ? frames[frames.length - 1].url : null;
+      const newLast = data.length ? data[data.length - 1].url : null;
+      const changed = data.length !== frames.length || newLast !== prevLast;
+      if (!initial && !changed) return;  // nic nového – neruš pohled
+
+      const playing = timer !== null;
+      const currentUrl = frames[idx] ? frames[idx].url : null;
+
+      frames = data;
+      seek.max = Math.max(0, frames.length - 1);
+      paintSeek();
+      preload(frames);
+
+      if (initial) {
+        show(0);
+        play();  // automatické přehrávání střední rychlostí (výchozí v <select>)
+      } else if (playing) {
+        show(frames.length - 1);  // sleduje živě → skoč na nejnovější snímek
+      } else {
+        // ručně krokuje → zachovej prohlížený snímek (index se mohl posunout úklidem)
+        let i = frames.findIndex(f => f.url === currentUrl);
+        if (i < 0) i = Math.min(idx, frames.length - 1);
+        show(i);
+      }
+    });
+}
+
+loadFrames(true).catch(() => { timeEl.textContent = "chyba načítání snímků"; });
+// pravidelně dotahuj nové snímky bez nutnosti refreshe stránky
+setInterval(() => loadFrames(false).catch(() => {}), 60000);
 </script>
 </body>
 </html>
